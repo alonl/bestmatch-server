@@ -107,6 +107,7 @@ UserProvider.prototype.register = function(token, callback) {
                 matches[i].matchRating = 0;
                 matches[i].votedYes = [];
             }
+            console.log("bulk inserting...");
             match_collection.insert(matches, {w: 0}, function(error, result){
                 if (errorHandler(error, "Error inserting match", callback)) {
                     return;
@@ -124,8 +125,14 @@ UserProvider.prototype.register = function(token, callback) {
         FB.api('fql', {q: 'SELECT uid, name, sex, birthday, relationship_status, current_location FROM user WHERE uid IN (SELECT uid2 FROM friend WHERE uid1=me()) AND (relationship_status = "Single" OR NOT relationship_status) AND sex = "male"'}, function(males) {
             FB.api('fql', {q: 'SELECT uid, name, sex, birthday, relationship_status, current_location FROM user WHERE uid IN (SELECT uid2 FROM friend WHERE uid1=me()) AND (relationship_status = "Single" OR NOT relationship_status) AND sex = "female"'}, function(females) {
                 insertNewUsers(males, females, function(error, matches) {
-                    newUser.leftToMatch = matches;
-                    callback(newUser);
+                    console.log("got matches");
+                    if (errorHandler(error, "error inserting users", callback)) {
+                        return;
+                    }
+                    console.log("updating new user");
+                    var output = JSON.parse(JSON.stringify(newUser));
+                    output.leftToMatch = matches;
+                    callback(output);
                 });
             });
         });
@@ -156,8 +163,16 @@ UserProvider.prototype.register = function(token, callback) {
                         location: fbUser.location.name
                     };
                     generateNewUserFriends(newUser, function(finalizedUser) {
+                        console.log("updating new user in db:");
+                        console.log(newUser);
                         users_collection.remove({uid: finalizedUser.uid}, function() {
+                            console.log("new user removed. now inserting");
                             users_collection.insert(finalizedUser, {w: 0}, function() {
+                                if (errorHandler(error, "error inserting new user", callback)) {
+                                    return;
+                                }
+                                console.log("new user inserted ok:");
+                                console.log(newUser);
                                 callback(null, newUser);
                                 return;
                             });
