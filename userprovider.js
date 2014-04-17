@@ -75,7 +75,14 @@ UserProvider.prototype.getUsersCollection = function(callback) {
             callback(error);
         }
         else {
-            callback(null, users_collection);
+            users_collection.ensureIndex( { uid: 1 }, { unique: true }, function(error, result){
+                if (errorHandler(error, "Error creating index", callback)) {
+                    return;
+                }
+                console.log("ensured users uid index ok");
+                console.log(result);
+                callback(null, users_collection);
+            });
         }
     });
 };
@@ -96,34 +103,50 @@ UserProvider.prototype.register = function(token, callback) {
     };
 
     var insertNewUsers = function(males, females, callback) {
-        console.log("getting matches collection...");
-        matchProvider.getMatchesCollection(function(error, match_collection) {
-            if (errorHandler(error, "Error: Error getting match collection", callback)) {
+        provider.getUsersCollection(function(error, users_collection) {
+            if (errorHandler(error, "Error 002", callback)) {
                 return;
             }
-            console.log("generating matches...");
-            var matches = cartesianProduct(males.data, females.data);
-            for (var i = 0; i < matches.length; i++) {
-                matches[i].matchRating = 0;
-                matches[i].votedYes = [];
-            }
-            console.log("bulk inserting...");
-            match_collection.insert(matches, {w: 0}, function(error, result){
-                if (errorHandler(error, "Error inserting match", callback)) {
+            console.log("bulk inserting new users");
+            users_collection.insert(males.concat(females), {w: 0}, function(error, result) {
+                if (errorHandler(error, "Error inserting users")) {
                     return;
                 }
                 console.log("inserted ok: " + result.length);
-                callback(null, result);
-                return;
-            });
 
+                console.log("getting matches collection...");
+                matchProvider.getMatchesCollection(function(error, match_collection) {
+                    if (errorHandler(error, "Error: Error getting match collection", callback)) {
+                        return;
+                    }
+                    console.log("generating matches...");
+                    var matches = cartesianProduct(males, females);
+                    for (var i = 0; i < matches.length; i++) {
+                        matches[i].matchRating = 0;
+                        matches[i].votedYes = [];
+                    }
+                    console.log("bulk inserting...");
+                    match_collection.insert(matches, {w: 0}, function(error, result){
+                        if (errorHandler(error, "Error inserting match", callback)) {
+                            return;
+                        }
+                        console.log("inserted ok: " + result.length);
+                        callback(null, result);
+                        return;
+                    });
+
+                });
+            });
         });
+
     };
 
     var generateNewUserFriends = function(newUser, callback) {
         FB.setAccessToken(newUser.fbToken);
         FB.api('fql', {q: 'SELECT uid, name, sex, birthday, relationship_status, current_location FROM user WHERE uid IN (SELECT uid2 FROM friend WHERE uid1=me()) AND (relationship_status = "Single" OR NOT relationship_status) AND sex = "male"'}, function(males) {
             FB.api('fql', {q: 'SELECT uid, name, sex, birthday, relationship_status, current_location FROM user WHERE uid IN (SELECT uid2 FROM friend WHERE uid1=me()) AND (relationship_status = "Single" OR NOT relationship_status) AND sex = "female"'}, function(females) {
+                males = males.data.map(function(male) {male.age = 3; male.location = male.current_location ? male.current_location.name : ""; return male;})
+                females = females.data.map(function(female) {female.age = 3; female.location = female.current_location ? female.current_location.name : ""; return female;})
                 insertNewUsers(males, females, function(error, matches) {
                     console.log("got matches");
                     if (errorHandler(error, "error inserting users", callback)) {
@@ -159,8 +182,10 @@ UserProvider.prototype.register = function(token, callback) {
                         uid: fbUser.id,
                         fbToken: token,
                         name: fbUser.name,
+                        sex: fbUser.gender,
+                        birthday: fbUser.birthday,
                         age: 3, // TODO: getAgeByBirthDate(fbUser.birthday),
-                        location: fbUser.location.name
+                        location: fbUser.location ? fbUser.location.name : ""
                     };
                     generateNewUserFriends(newUser, function(finalizedUser) {
                         console.log("updating new user in db:");
