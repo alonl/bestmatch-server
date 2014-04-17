@@ -1,10 +1,3 @@
-/**
- * This file handles the logic and DB actions related to the spotify actions.
- * User: ofer
- * Date: 06/09/13
- * Time: 21:38
- */
-
 var mongodb = require('mongodb');
 var Db = mongodb.Db;
 var Connection = mongodb.Connection;
@@ -14,16 +7,16 @@ var ObjectID = mongodb.ObjectID;
 var assert = require('assert');
 var Step = require('step');
 var FB = require('fb');
-var config = require('./config')
+var config = require('./config');
+
+MatchProvider = require('./matchProvider').MatchProvider;
+var matchProvider = new MatchProvider(GLOBAL.mongo_host, GLOBAL.mongo_port);
 
 FB.options({
     appId:          config.facebook.appId,
     appSecret:      config.facebook.appSecret,
     redirectUri:    config.facebook.redirectUri
 });
-
-MatchProvider = require('./matchprovider').MatchProvider;
-var matchProvider = new MatchProvider(GLOBAL.mongo_host, GLOBAL.mongo_port);
 
 var errorHandler = function(error, message, callback) {
     if (error) {
@@ -34,7 +27,7 @@ var errorHandler = function(error, message, callback) {
     } else {
         return false;
     }
-}
+};
 
 UserProvider = function (host, port) {
     var provider = this;
@@ -96,7 +89,7 @@ UserProvider.prototype.register = function(token, callback) {
         var output = [];
         for (var m = 0; m < males.length; m++) {
             for (var f = 0; f < females.length; f++) {
-                output.push({uidM: males[m].uid, uidF: females[f].uid});
+                output.push({uidM: males[m].uid, male: males[m], uidF: females[f].uid, female: females[f]});
             }
         }
         return output;
@@ -143,8 +136,8 @@ UserProvider.prototype.register = function(token, callback) {
 
     var generateNewUserFriends = function(newUser, callback) {
         FB.setAccessToken(newUser.fbToken);
-        FB.api('fql', {q: 'SELECT uid, name, sex, birthday, relationship_status, current_location FROM user WHERE uid IN (SELECT uid2 FROM friend WHERE uid1=me()) AND (relationship_status = "Single" OR NOT relationship_status) AND sex = "male"'}, function(males) {
-            FB.api('fql', {q: 'SELECT uid, name, sex, birthday, relationship_status, current_location FROM user WHERE uid IN (SELECT uid2 FROM friend WHERE uid1=me()) AND (relationship_status = "Single" OR NOT relationship_status) AND sex = "female"'}, function(females) {
+        FB.api('fql', {q: 'SELECT uid, name, sex, birthday, relationship_status, current_location FROM user WHERE uid IN (SELECT uid2 FROM friend WHERE uid1=me()) AND (relationship_status = "Single") AND sex = "male"'}, function(males) {
+            FB.api('fql', {q: 'SELECT uid, name, sex, birthday, relationship_status, current_location FROM user WHERE uid IN (SELECT uid2 FROM friend WHERE uid1=me()) AND (relationship_status = "Single") AND sex = "female"'}, function(females) {
                 males = males.data.map(function(male) {male.age = 3; male.location = male.current_location ? male.current_location.name : ""; return male;})
                 females = females.data.map(function(female) {female.age = 3; female.location = female.current_location ? female.current_location.name : ""; return female;})
                 insertNewUsers(males, females, function(error, matches) {
@@ -154,7 +147,11 @@ UserProvider.prototype.register = function(token, callback) {
                     }
                     console.log("updating new user");
                     var output = JSON.parse(JSON.stringify(newUser));
-                    output.leftToMatch = matches;
+                    var shuffle = function(o){ //v1.0
+                        for(var j, x, i = o.length; i; j = Math.floor(Math.random() * i), x = o[--i], o[i] = o[j], o[j] = x);
+                        return o;
+                    };
+                    output.leftToMatch = shuffle(matches);
                     callback(output);
                 });
             });
@@ -211,26 +208,39 @@ UserProvider.prototype.register = function(token, callback) {
 
 
 // In case of an error, calls the error handler
-UserProvider.prototype.getTopSongsForUser = function (collection, user_id, top_number, sort_by, error_handler, in_callback) {
-    top_number = parseInt(top_number);
-    var return_results = function (error, songs_array) {
-        if (error) {
-            error_handler(error);
+UserProvider.prototype.getNextLeftToMatch = function (uid, numOfSuggest, callback) {
+    var provider = this;
+
+    // take next leftToMatch of the user
+    this.getUsersCollection(function(error, users_collection) {
+        if (errorHandler(error, "Error getting users collection", callback)) {
             return;
         }
+        console.log("finding uid: " + uid);
+        users_collection.find({uid: uid}).toArray(function(error, user_res) {
+            if (errorHandler(error, "Error getting user", callback) || user_res.length == 0) {
+               console.log("User not found or error.");
+               return;
+            }
+            var user = user_res[0];
+            var suggest = user.leftToMatch.slice(0, numOfSuggest);
 
-        for (var i = 0; i < songs_array.length; i++) {
-            songs_array[i].rank = i;
-        }
+            users_collection.update(
+                { uid: uid },
+                { $set: { leftToMatch: user.leftToMatch.slice(numOfSuggest + 1)} }, // TODO: out of bounds?
+                { multi: false, w: 0 },
+                function(error, result) {
+                    if (errorHandler(error, "Error updating user")) {
+                        return;
+                    }
+                    callback(null, suggest);
+                }
+            );
 
-        in_callback(songs_array);
-    };
-    if (user_id != null) {
-        collection.find({user_id: user_id}).sort(sort_by).limit(top_number).toArray(return_results);
-    } else {
-        collection.find().sort(sort_by).limit(top_number).toArray(return_results);
-    }
-}
+        });
+
+    });
+};
 
 UserProvider.prototype.returnTopRated = function (recommendation_result, collection, user_id, top_number, callback) {
     var provider = this;

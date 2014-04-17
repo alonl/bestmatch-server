@@ -4,20 +4,16 @@ var matchProvider= new MatchProvider(GLOBAL.mongo_host, GLOBAL.mongo_port);
 
 
 exports.setMatch = function(req, res){
-//    matchProvider.test("nothing", function(error, result) {
-//        if(error) {
-//            console.log(error.toString());
-//            res.statusCode = 400;
-//            res.send(error.toString());
-//        } else {
-//            res.statusCode = 200;
-//            res.send(result);
-//        }
-//    });
-
-
-    res.statusCode = 200;
-    res.send("OK");
+    matchProvider.updateMatch(req.params.uid, req.query.matchID, parseInt(req.query.matchScore), function(error, result) { // TODO: params?
+        if (error) {
+            console.log(error);
+            res.statusCode = 400;
+            res.send(error.toString());
+        } else {
+            res.statusCode = 200;
+            res.send("OK");
+        }
+    });
 };
 
 exports.getMatches = function(req, res) {
