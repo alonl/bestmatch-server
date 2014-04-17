@@ -67,18 +67,28 @@ MatchProvider.prototype.updateMatch = function (uid, matchID, matchScore, callba
     provider.getMatchesCollection(function(error, matches_collection) {
         if (errorHandler(error, "DB Error 003", callback)) return;
         var uidArr = matchScore == 1 ? [uid] : [];
-//        matches_collection.update(
-//            { _id: matchID },
-//            {
-//                $inc: {matchRating: matchScore}
-////                $push: {votedYes: { $each: uidArr }}
-//            },
-//            { multi: false, w: 0},
-//            function(error, result) {
-//                if (errorHandler(error, "DB Error 004", callback)) return;
-//                callback(null, result);
-//            }
-//        );
+        matches_collection.update(
+            { _id: new BSON.ObjectID(matchID) },
+            {
+                $inc: {matchRating: matchScore},
+                $addToSet: {votedYes: { $each: uidArr }}
+            },
+            { multi: false, w: 0}
+        );
+        callback(null, "OK");
+    });
+};
+
+MatchProvider.prototype.findMatches = function (uid, callback) {
+    console.log("find matches: params:");
+    console.log("uid: " + uid);
+    var provider = this;
+    provider.getMatchesCollection(function(error, matches_collection) {
+        if (errorHandler(error, "DB Error 004", callback)) return;
+        matches_collection.find({$and: [{matchRating: {$gte: 1}}, {$or: [{uidF: uid}, {uidM: uid}]}]}).toArray(function(error, result) {
+            if (errorHandler(error, "DB Error 005", callback)) return;
+            callback(null, result);
+        });
     });
 };
 
