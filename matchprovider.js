@@ -30,6 +30,17 @@ var CHANGE_VOLUME_NORMAL = 0.4;
 var MAX_SAMPLES = 50;
 var MILLISECONDS_OF_SAMPLES_BACK = 2000;
 
+var errorHandler = function(error, message, callback) {
+    if (error) {
+        console.log(message);
+        console.log(error);
+        callback(message);
+        return true
+    } else {
+        return false;
+    }
+}
+
 MatchProvider = function (host, port) {
 //    this.db = new Db('node_mongo_Brainify', new Server(host, port, {safe: false}, {auto_reconnect: true}, {}));
 //    this.db.open(function () {
@@ -45,18 +56,25 @@ MatchProvider = function (host, port) {
     });
 };
 
-MatchProvider.prototype.getEmotivCollection = function (callback) {
+MatchProvider.prototype.getMatchesCollection = function (callback) {
+    console.log("getting matches collection");
     if(!this.db.serverConfig.isConnected()) {
         callback("Db is not connected!");
         return;
     }
-
-    this.db.collection('emotiv_samples', function (error, samples_collection) {
+    this.db.collection('matches', function (error, matches_collection) {
         if (error) {
             callback(error);
         }
         else {
-            callback(null, samples_collection);
+            matches_collection.ensureIndex( { uidM: 1, uidF: 1 }, { unique: true }, function(error, result){
+                if (errorHandler(error, "Error creating index", callback)) {
+                    return;
+                }
+                console.log("ensured index ok");
+                console.log(result);
+                callback(null, matches_collection);
+            });
         }
     });
 };
@@ -111,7 +129,7 @@ MatchProvider.prototype.save = function (data, callback) {
         item.server_time = item.local_time + time_offset;
     });
 
-    this.getEmotivCollection(function (error, samples_collection) {
+    this.getMatchesCollection(function (error, samples_collection) {
         if (error) {
             callback(error);
             return;
@@ -158,7 +176,7 @@ MatchProvider.prototype.getOrCreateUser = function (user_id_param, errorHandler,
 }
 
 MatchProvider.prototype.getRelevantSamples = function (user, errorHandler, callback) {
-    this.getEmotivCollection(function (error, samples_collection) {
+    this.getMatchesCollection(function (error, samples_collection) {
         if (error) {
             errorHandler(error);
             return;

@@ -11,6 +11,8 @@ if (process.env.VCAP_SERVICES){ // appfog
 
 
 var express = require('express')
+    , FB = require('fb')
+    , config = require('./config')
     , routes = require('./routes')
     , match = require('./routes/match')
     , user = require('./routes/user')
@@ -48,9 +50,9 @@ app.get('/', routes.index);
 app.get('/setup/reset', setup.resetDB);
 
 app.post('/users', user.register);
-//app.get('/suggest/:uid', user.getSuggestions);
-//app.post('/matches/:uid', match.setMatch);
-//app.get('/matches/:uid', match.getMatches);
+app.get('/suggest/:uid', user.getSuggestions);
+app.post('/matches/:uid', match.setMatch);
+app.get('/matches/:uid', match.getMatches);
 
 http.createServer(app).listen(app.get('port'), function(){
     console.log('Express server listening on port ' + app.get('port'));
