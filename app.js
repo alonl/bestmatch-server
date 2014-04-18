@@ -1,14 +1,3 @@
-// mongo config
-if (process.env.VCAP_SERVICES){ // appfog
-    var env = JSON.parse(process.env.VCAP_SERVICES);
-    var mongo = env['mongodb-1.8'][0]['credentials'];
-    GLOBAL.mongo_host = mongo.hostname;
-    GLOBAL.mongo_port = mongo.port;
-} else { // local
-    GLOBAL.mongo_host = "localhost"
-    GLOBAL.mongo_port = "27017";
-}
-
 
 var express = require('express')
     , FB = require('fb')
