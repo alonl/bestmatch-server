@@ -11,6 +11,7 @@ exports.register = function(req, res) {
             res.send(error.toString());
         } else {
             res.statusCode = 200;
+            console.log(JSON.stringify(userObject));
             res.send(userObject);
         }
     });
@@ -33,6 +34,7 @@ exports.getSuggestions = function(req, res) {
            res.send(error.toString());
        } else {
            res.statusCode = 200;
+           console.log(JSON.stringify(result));
            res.send(result);
        }
     });

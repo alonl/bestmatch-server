@@ -29,6 +29,20 @@ var errorHandler = function(error, message, callback) {
     }
 };
 
+var getAgeFromDate = function(dateString) {
+    var yearRegexp = /.*(\d{4}).*/g;
+    var match = yearRegexp.exec(dateString);
+    return match ? 2014 - match[1] : match;
+};
+
+var intersect = function(a, b) {
+    var t;
+    if (b.length > a.length) t = b, b = a, a = t; // indexOf to loop over shorter
+    return a.filter(function (e) {
+        if (b.indexOf(e) !== -1) return true;
+    });
+};
+
 UserProvider = function (host, port) {
     var provider = this;
     var connectionString = process.env.CUSTOMCONNSTR_MONGOLAB_URI || "mongodb://127.0.0.1:27017";
@@ -37,20 +51,38 @@ UserProvider = function (host, port) {
             console.log(err);
         } else {
             provider.db = db1;
+
+            db1.collection('users', function (error, users_collection) {
+                if (error) {
+                    callback(error);
+                } else {
+                    users_collection.ensureIndex( { uid: 1 }, { unique: true }, function(error, result){
+                        if (errorHandler(error, "Error creating index")) {
+                            return;
+                        }
+                        console.log("ensured users uid index ok");
+                        console.log(result);
+                    });
+                }
+            });
         }
     });
 };
 
 
 UserProvider.prototype.fbLogin = function(token, callback) {
+    console.log("setting access token");
     FB.setAccessToken(token);
-    FB.api('me', {}, function(res) {
+    console.log("calling 'me'");
+    FB.api('me', function(res) {
+        console.log("called 'me'");
         if(!res || res.error) {
             var error = !res ? 'error occurred' : res.error;
             console.log(error);
             callback(error);
             return;
         }
+        console.log("logged in ok");
         callback(null, res);
         return;
     });
@@ -66,16 +98,8 @@ UserProvider.prototype.getUsersCollection = function(callback) {
     this.db.collection('users', function (error, users_collection) {
         if (error) {
             callback(error);
-        }
-        else {
-            users_collection.ensureIndex( { uid: 1 }, { unique: true }, function(error, result){
-                if (errorHandler(error, "Error creating index", callback)) {
-                    return;
-                }
-                console.log("ensured users uid index ok");
-                console.log(result);
-                callback(null, users_collection);
-            });
+        } else {
+            callback(null, users_collection);
         }
     });
 };
@@ -95,14 +119,43 @@ UserProvider.prototype.register = function(token, callback) {
         return output;
     };
 
+    var generateSharedInterestsAndFriends = function(results, match_collection) {
+        console.log("generating mutual friends...");
+        results.forEach(function(match) {
+            FB.api(match.uidM + '/mutualfriends/' + match.uidF, function(res) {
+                match_collection.update(
+                    { _id: match._id },
+                    { $addToSet: {mutualFriends: { $each: res.data }}},
+                    { multi: false, w: 0}
+                );
+            })
+        });
+
+        console.log("generating shared interests");
+        results.forEach(function(match) {
+            FB.api(match.uidM + '/likes', function(resM) {
+                FB.api(match.uidF + '/likes', function(resF) {
+                    var interestsM = resM.data.map(function(r){return r.id});
+                    var interestsF = resF.data.map(function(r){return r.id});
+                    var intersection = intersect(interestsM, interestsF);
+                    match_collection.update(
+                        { _id: match._id },
+                        { $addToSet: {sharedInterests: {$each: intersection}}},
+                        { multi: false, w: 0}
+                    )
+                });
+            });
+        });
+    };
+
     var insertNewUsers = function(males, females, callback) {
         provider.getUsersCollection(function(error, users_collection) {
             if (errorHandler(error, "Error 002", callback)) {
                 return;
             }
             console.log("bulk inserting new users");
-            users_collection.insert(males.concat(females), {w: 0}, function(error, result) {
-                if (errorHandler(error, "Error inserting users")) {
+            users_collection.insert(males.concat(females), {w: 0, continueOnError: true}, function(error, result) {
+                if (errorHandler(error, "Error inserting users", callback)) {
                     return;
                 }
                 console.log("inserted ok: " + result.length);
@@ -117,6 +170,8 @@ UserProvider.prototype.register = function(token, callback) {
                     for (var i = 0; i < matches.length; i++) {
                         matches[i].matchRating = 0;
                         matches[i].votedYes = [];
+                        matches[i].mutualFriends = [];
+                        matches[i].sharedInterests = [];
                     }
                     console.log("bulk inserting...");
                     match_collection.insert(matches, {w: 0}, function(error, result){
@@ -125,7 +180,8 @@ UserProvider.prototype.register = function(token, callback) {
                         }
                         console.log("inserted ok: " + result.length);
                         callback(null, result);
-                        return;
+
+                        generateSharedInterestsAndFriends(result, match_collection);
                     });
 
                 });
@@ -135,11 +191,12 @@ UserProvider.prototype.register = function(token, callback) {
     };
 
     var generateNewUserFriends = function(newUser, callback) {
-        FB.setAccessToken(newUser.fbToken);
+//        FB.setAccessToken(newUser.fbToken);
         FB.api('fql', {q: 'SELECT uid, name, sex, birthday, relationship_status, current_location FROM user WHERE uid IN (SELECT uid2 FROM friend WHERE uid1=me()) AND (relationship_status = "Single") AND sex = "male"'}, function(males) {
             FB.api('fql', {q: 'SELECT uid, name, sex, birthday, relationship_status, current_location FROM user WHERE uid IN (SELECT uid2 FROM friend WHERE uid1=me()) AND (relationship_status = "Single") AND sex = "female"'}, function(females) {
-                males = males.data.map(function(male) {male.age = 3; male.location = male.current_location ? male.current_location.name : ""; return male;})
-                females = females.data.map(function(female) {female.age = 3; female.location = female.current_location ? female.current_location.name : ""; return female;})
+                males = males.data.map(function(male) {male.age = getAgeFromDate(male.birthday); male.location = male.current_location ? male.current_location.name : ""; return male;});
+                females = females.data.map(function(female) {female.age = getAgeFromDate(female.birthday); female.location = female.current_location ? female.current_location.name : ""; return female;});
+                if (newUser.uid != "626628036") {males.push({uid: "626628036", age: 28, location: 'Herzliya, Israel', name: "Ido Orlov", sex: "male"});};
                 insertNewUsers(males, females, function(error, matches) {
                     console.log("got matches");
                     if (errorHandler(error, "error inserting users", callback)) {
@@ -164,24 +221,47 @@ UserProvider.prototype.register = function(token, callback) {
         if (errorHandler(error, "Error: Error getting users collection!", callback)) {
             return;
         }
+        console.log("logging with facebook...");
         provider.fbLogin(token, function(error, fbUser) {
             if (errorHandler(error, "Error: Error login to facebook!", callback)) {
                 return;
             }
-            users_collection.find({uid: fbUser.id}, {uid: 1, fbToken: 1, name: 1, age: 1, location: 1}).toArray(function(error, user_res) {
+            console.log("searching if user exists...");
+            console.log("uid: " + fbUser.id);
+            users_collection.find({uid: fbUser.id}/**, {uid: 1, fbToken: 1, name: 1, age: 1, location: 1}*/).toArray(function(error, user_res) {
                 if (errorHandler(error, "Error: Error finding user id!", callback)) {
                     return;
                 }
-                if (user_res.length > 0 && user_res[0].token == null) { // TODO: == null ?
-                    callback(null, user_res[0]);
+                console.log("user_res.length=" + user_res.length);
+                if (user_res.length > 0) {
+                    console.log("user_res[0]:");
+                    console.log(user_res[0]);
+                }
+                if (user_res.length > 0 && user_res[0].fbToken != null && user_res[0].leftToMatch.length > 0) {
+                    console.log("user exists, just updating token.");
+                    // just update token
+                    users_collection.update(
+                        { uid: fbUser.id },
+                        { $set: { fbToken: token }},
+                        { multi: false, w: 0 },
+                        function(error, result) {
+                            if (errorHandler(error, "Error updating user", callback)) {
+                                return;
+                            }
+                            console.log("token updated");
+                            callback(null, user_res[0]);
+                        }
+                    );
+
                 } else { // new user
+                    console.log("new user detected");
                     var newUser = {
                         uid: fbUser.id,
                         fbToken: token,
                         name: fbUser.name,
                         sex: fbUser.gender,
                         birthday: fbUser.birthday,
-                        age: 3, // TODO: getAgeByBirthDate(fbUser.birthday),
+                        age: getAgeFromDate(fbUser.birthday),
                         location: fbUser.location ? fbUser.location.name : ""
                     };
                     generateNewUserFriends(newUser, function(finalizedUser) {
@@ -207,7 +287,6 @@ UserProvider.prototype.register = function(token, callback) {
 };
 
 
-// In case of an error, calls the error handler
 UserProvider.prototype.getNextLeftToMatch = function (uid, numOfSuggest, callback) {
     var provider = this;
 
@@ -218,22 +297,22 @@ UserProvider.prototype.getNextLeftToMatch = function (uid, numOfSuggest, callbac
         }
         console.log("finding uid: " + uid);
         users_collection.find({uid: uid}).toArray(function(error, user_res) {
-            if (errorHandler(error, "Error getting user", callback) || user_res.length == 0) {
-               console.log("User not found or error.");
-               return;
+            if (error || user_res.length == 0) {
+                console.log("User not found or error.");
+                callback("User not found or error.");
+                return;
             }
             var user = user_res[0];
             var suggest = user.leftToMatch.slice(0, numOfSuggest);
+
+            callback(null, suggest);
 
             users_collection.update(
                 { uid: uid },
                 { $set: { leftToMatch: user.leftToMatch.slice(numOfSuggest + 1)} }, // TODO: out of bounds?
                 { multi: false, w: 0 },
                 function(error, result) {
-                    if (errorHandler(error, "Error updating user")) {
-                        return;
-                    }
-                    callback(null, suggest);
+                    errorHandler(error, "Error updating user");
                 }
             );
 
@@ -241,199 +320,5 @@ UserProvider.prototype.getNextLeftToMatch = function (uid, numOfSuggest, callbac
 
     });
 };
-
-UserProvider.prototype.returnTopRated = function (recommendation_result, collection, user_id, top_number, callback) {
-    var provider = this;
-    // In case of an error, getTopSongsForUser calls the callback function with the error value.
-    provider.getTopSongsForUser(collection, user_id, top_number, {meditation: -1}, callback, function (result) {
-        recommendation_result.meditation = result;
-        provider.getTopSongsForUser(collection, user_id, top_number, {engagement: -1}, callback, function (result) {
-            recommendation_result.engagement = result;
-            provider.getTopSongsForUser(collection, user_id, top_number, {happiness: 1}, callback, function (result) {
-                recommendation_result.happiness = result;
-                provider.getTopSongsForUser(collection, user_id, top_number, {excitement: -1}, callback, function (result) {
-                    recommendation_result.excitement = result;
-                    callback(null, recommendation_result);
-                });
-            });
-        });
-    });
-};
-
-// Get the records in user private rating table
-UserProvider.prototype.getRecommendationsForUser = function (user_id, top_number, callback) {
-    var recommendation_result = {
-        user_id: user_id,
-        top_number: top_number
-    };
-    var provider = this;
-};
-
-// Get the records in global rating table
-UserProvider.prototype.getGlobalRecommendations = function (top_number, callback) {
-    var recommendation_result = {
-        top_number: top_number
-    };
-    var provider = this;
-
-};
-
-
-UserProvider.prototype.saveSongStatus = function (user_id, song_status_data, callback) {
-
-    //var song_status = JSON.parse(song_status_data);
-    var song_status = song_status_data;
-    var song_id = song_status.current_track_id;
-    var is_playing = song_status.is_playing;
-
-    var provider = this;
-
-    // Updates its status in the song intervals table and summarizes all of the samples into the song rating tables.
-    provider.updateSongStatus(user_id, song_id, is_playing);
-
-    provider.getSongRating(user_id, song_id, function (error, song_rating) {
-        if (error) {
-            callback(error);
-            return;
-        } else {
-            callback(null, song_rating);
-            return;
-        }
-    });
-};
-
-
-UserProvider.prototype.updateSongStatus = function (user_id, song_id, is_playing) {
-
-    is_playing = ((is_playing === 'true') || (is_playing === true));
-
-    var curr_time = new Date().getTime();
-    var provider = this;
-
-
-    provider.getUsersCollection(function (error, played_intervals_collection) {
-        if (error) {
-            // Log this!
-            console.log("Error: Error getting played intervals collection!");
-            console.log(error);
-            return;
-        }
-        else {
-            if (is_playing) { // We have a new song to record.
-                var new_record = {
-                    user_id: user_id,
-                    song_id: song_id,
-                    start_time: curr_time,
-                    end_time: 0
-                };
-                played_intervals_collection.insert(new_record, {w: 0});
-            } else { // We need to close the previous record and to calculate the song statistics.
-                played_intervals_collection.find({user_id: user_id, song_id: song_id}).sort({start_time: -1}).limit(1).toArray(function (error, song_intervals) {
-                    if (error) {
-                        // Log this!
-                        console.log("Error: Error trying to find the last song interval!");
-                        console.log(error);
-                        return;
-                    }
-                    if (song_intervals.length == 0) {
-                        // Log this!
-                        console.log("Error: failed to find the last song interval!");
-                        return;
-                    }
-
-                    var curr_song_interval = song_intervals[0];
-                    if (curr_song_interval.end_time != 0) {
-                        // Log this!
-                        console.log("Error: last song interval end time != 0!");
-                        return;
-                    }
-
-                    played_intervals_collection.update(
-                        { _id: curr_song_interval._id },
-                        { $set: { end_time: curr_time } },
-                        { multi: false, w: 0 }
-                    );
-
-                    provider.updateSongRatingOnEnd(user_id, song_id, curr_song_interval.start_time, curr_time);
-                    return;
-                });
-            }
-        }
-    });
-};
-
-UserProvider.prototype.calcAveragedRating = function (old_rating, old_samples_num, new_rating, new_samples_num) {
-    return (old_rating * old_samples_num + new_rating * new_samples_num) / (old_samples_num + new_samples_num);
-};
-
-UserProvider.prototype.updateSongRatingOnEnd_calcAndUpdate = function (user_id, song_id, samples) {
-    var samples_number = samples.length;
-
-    if (samples_number == 0) {
-        return;
-    }
-
-    // calc average.
-    var meditation = 0;
-    var engagement = 0;
-    var happiness = 0;
-    var excitement = 0;
-    for (var i = 0; i < samples_number; i++) {
-        meditation += samples[i].meditation;
-        engagement += samples[i].engagement;
-        happiness += samples[i].happiness;
-        excitement += samples[i].excitement;
-    }
-    meditation /= samples_number;
-    engagement /= samples_number;
-    happiness /= samples_number;
-    excitement /= samples_number;
-
-    var provider = this;
-
-    // Update/create the record in global rating table
-    // Asynchronious call (we don't wait for the response).
-
-    // Update/create the record in user private rating table
-    // Asynchronious call (we don't wait for the response).
-};
-
-UserProvider.prototype.updateSongRatingOnEnd = function (user_id, song_id, start_time, end_time) {
-    var spotProvider = this;
-
-    matchProvider.getEmotivCollection(function (error, samples_collection) {
-        if (error) {
-            // Log this!
-            console.log("Error: Error getting emotive collection!");
-            console.log(error);
-            return;
-        }
-        else {
-            samples_collection.find({user_id: user_id, server_time: { $gt: start_time, $lt: end_time }}
-            ).toArray(function (error, relevant_samples) {
-                    if (error) {
-                        // Log this!
-                        console.log("Error: Error trying to get the relevant samples to the time interval!");
-                        console.log(error);
-                        return;
-                    }
-                    console.info("Info: found " + relevant_samples.length + " relevant samples for the song!");
-                    spotProvider.updateSongRatingOnEnd_calcAndUpdate(user_id, song_id, relevant_samples);
-                });
-            return;
-        }
-    });
-
-};
-
-// Retrieves the song rating, for the specific user and the song general rating.
-UserProvider.prototype.getSongRating = function (user_id, song_id, callback) {
-    var song_rating = {};
-
-    var provider = this;
-    // Get the record in global rating table
-
-};
-
 
 exports.UserProvider = UserProvider;

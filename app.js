@@ -47,7 +47,7 @@ if ('development' == app.get('env')) {
 
 
 app.get('/', routes.index);
-app.get('/setup/reset', setup.resetDB);
+app.get('/setup/reset', match.reset);
 
 app.post('/users', user.register);
 app.get('/suggest/:uid', user.getSuggestions);

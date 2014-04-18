@@ -22,9 +22,6 @@ var errorHandler = function(error, message, callback) {
 }
 
 MatchProvider = function (host, port) {
-//    this.db = new Db('node_mongo_Brainify', new Server(host, port, {safe: false}, {auto_reconnect: true}, {}));
-//    this.db.open(function () {
-//    });
     var provider = this;
     var connectionString = process.env.CUSTOMCONNSTR_MONGOLAB_URI || "mongodb://127.0.0.1:27017";
     Db.connect(connectionString, function(err, db1) {
@@ -91,5 +88,111 @@ MatchProvider.prototype.findMatches = function (uid, callback) {
         });
     });
 };
+
+
+
+MatchProvider.prototype.reset = function(callback) {
+    var provider = this;
+    provider.getMatchesCollection((function(error, matches_collection) {
+        if (errorHandler(error, "DB Error 006", callback)) return;
+
+        provider.db.collection('users', function(err, collection) {
+            collection.remove({}, {w: 0});
+        });
+        provider.db.collection('matches', function(err, collection) {
+            collection.remove({}, {w: 0}, function() {
+
+                matches_collection.insert(
+                    [
+                        {
+                            "uidM" : "626628036",
+                            "male" : {
+                                "uid" : "626628036",
+                                "name" : "Ido Orlov",
+                                "sex" : "male",
+                                "birthday" : "02/17/1986",
+                                "age" : 28,
+                                "location" : "Herzliya, Israel",
+                                "relationship_status" : "Single",
+                                "age" : 28,
+                                "_id" : "53504d67bcc60b181c0021e7"
+                            },
+                            "uidF" : "602789669",
+                            "female" : {
+                                "uid" : "602789669",
+                                "name" : "Dana Bookstein",
+                                "sex" : "female",
+                                "relationship_status" : "Single",
+                                "age" : 26,
+                                "location" : "Herzliya, Israel"
+                            },
+                            "matchRating" : 3,
+                            "votedYes" : ["564350957", "1127758094", "581384374"],
+                            "mutualFriends" : ["564350957", "1195614300", "1140158144", "1127758094", "1501802451", "840485432", "581384374"]
+                        },
+                        {
+                            "uidM" : "626628036",
+                            "male" : {
+                                "uid" : "626628036",
+                                "name" : "Ido Orlov",
+                                "sex" : "male",
+                                "birthday" : "02/17/1986",
+                                "age" : 28,
+                                "location" : "Herzliya, Israel",
+                                "relationship_status" : "Single",
+                                "age" : 28
+                            },
+                            "uidF" : "1378982912",
+                            "female" : {
+                                "uid" : "1378982912",
+                                "name" : "Stav Moskovich",
+                                "sex" : "female",
+                                "relationship_status" : "Single",
+                                "age" : 25,
+                                "location" : "Omez, Hamerkaz, Israel"
+                            },
+                            "matchRating" : 2,
+                            "votedYes" : ["100000173886116", "100001772443975"],
+                            "mutualFriends" : ["564350957", "100001772443975", "1140158144", "100000173886116", "688082903"]
+                        },
+                        {
+                            "uidM" : "626628036",
+                            "male" : {
+                                "uid" : "626628036",
+                                "name" : "Ido Orlov",
+                                "sex" : "male",
+                                "birthday" : "02/17/1986",
+                                "age" : 28,
+                                "location" : "Herzliya, Israel",
+                                "relationship_status" : "Single",
+                                "age" : 28
+                            },
+                            "uidF" : "1003059672",
+                            "female" : {
+                                "uid" : "1003059672",
+                                "name" : "Roni Laufer",
+                                "sex" : "female",
+                                "relationship_status" : "Single",
+                                "age" : 26,
+                                "location" : "Herzliya, Israel"
+                            },
+                            "matchRating" : 1,
+                            "votedYes" : ["1127758094"],
+                            "mutualFriends" : ["1501802451", "840485432", "581384374", "1127758094"]
+                        }
+                    ],
+                    {w: 0, continueOnError: true},
+                    function(error, result) {
+                        if (errorHandler(error, "DB Error 009", callback)) return;
+                        callback(null, "OK");
+                    }
+                );
+
+            });
+        });
+    }));
+};
+
+
 
 exports.MatchProvider = MatchProvider;

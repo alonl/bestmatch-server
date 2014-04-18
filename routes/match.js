@@ -11,7 +11,22 @@ exports.setMatch = function(req, res){
             res.send(error.toString());
         } else {
             res.statusCode = 200;
+            console.log("OK");
             res.send("OK");
+        }
+    });
+};
+
+exports.reset = function(req, res) {
+    matchProvider.reset(function(error, result) {
+        if (error) {
+            console.log(error);
+            res.statusCode = 400;
+            res.send(error.toString());
+        } else {
+            res.statusCode = 200;
+            console.log(JSON.stringify(result));
+            res.send(result.toString());
         }
     });
 };
@@ -24,6 +39,7 @@ exports.getMatches = function(req, res) {
             res.send(error.toString());
         } else {
             res.statusCode = 200;
+            console.log(JSON.stringify(result));
             res.send(result);
         }
     });
