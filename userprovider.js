@@ -228,16 +228,13 @@ UserProvider.prototype.register = function(token, callback) {
             }
             console.log("searching if user exists...");
             console.log("uid: " + fbUser.id);
-            users_collection.find({uid: fbUser.id}/**, {uid: 1, fbToken: 1, name: 1, age: 1, location: 1}*/).toArray(function(error, user_res) {
+            users_collection.find({uid: fbUser.id}, {uid: 1, fbToken: 1, name: 1, age: 1, location: 1, leftToMatch: 1}).toArray(function(error, user_res) {
                 if (errorHandler(error, "Error: Error finding user id!", callback)) {
                     return;
                 }
                 console.log("user_res.length=" + user_res.length);
-                if (user_res.length > 0) {
-                    console.log("user_res[0]:");
-                    console.log(user_res[0]);
-                }
                 if (user_res.length > 0 && user_res[0].fbToken != null && user_res[0].leftToMatch.length > 0) {
+                    user_res[0].leftToMatch = []; // not necessarry now
                     console.log("user exists, just updating token.");
                     // just update token
                     users_collection.update(
